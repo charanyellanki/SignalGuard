@@ -1,0 +1,9 @@
+aiokafka==0.11.0
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+scikit-learn==1.5.2
+numpy==1.26.4
+joblib==1.4.2
+# CPU-only torch keeps the image small; Docker build pulls from the CPU index.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1

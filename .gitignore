@@ -1,0 +1,55 @@
+# ─── Secrets / local config ────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+.python-version
+
+# ─── Trained models ────────────────────────────────────────────────────────
+# Production copies live in the detection_models Docker volume.
+# Local training artifacts stay out of git.
+detection-service/models/trained/*.joblib
+detection-service/models/trained/*.pkl
+detection-service/models/trained/*.pt
+detection-service/models/trained/*.pth
+detection-service/models/trained/*.json
+
+# ─── Jupyter ───────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.out.ipynb
+
+# ─── Node / frontend ───────────────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+frontend/.turbo/
+frontend/coverage/
+
+# ─── Alembic ───────────────────────────────────────────────────────────────
+# Keep versions/, but ignore caches inside it.
+api/alembic/versions/__pycache__/
+
+# ─── Editor / OS ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ─── Docker / local runtime ────────────────────────────────────────────────
+*.pid
+*.log
+logs/
