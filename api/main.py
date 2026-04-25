@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from db import SessionLocal
+from routes import admin as admin_routes
 from routes import anomalies as anomalies_routes
+from routes import customers as customers_routes
 from routes import devices as devices_routes
 from routes import sites as sites_routes
 from routes import websocket as ws_routes
@@ -39,7 +41,11 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="SignalGuard API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Janus Nokē Smart Entry — Operations API",
+    version="0.2.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -49,9 +55,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(customers_routes.router)
 app.include_router(sites_routes.router)
 app.include_router(devices_routes.router)
 app.include_router(anomalies_routes.router)
+app.include_router(admin_routes.router)
 app.include_router(ws_routes.router)
 
 

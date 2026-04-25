@@ -70,18 +70,23 @@ def _severity(score: float, threshold: float) -> str:
 
 
 def _classify_point_anomaly(sample: dict) -> str:
-    """Cheap heuristic label for IForest flags, using Noke domain language.
+    """Cheap heuristic label for IForest flags, using Nokē playbook language.
 
     The model is feature-agnostic; these labels just give the dashboard a
-    typed reason that maps to the operations playbook (battery dispatch,
-    gateway escalation, after-hours access review)."""
+    typed reason that maps to the operations playbook:
+
+        lock_battery_critical    → schedule a battery swap (cheap, batchable)
+        gateway_disconnect       → escalate to network ops / carrier
+        tenant_access_anomaly    → review video, contact tenant, security
+        telemetry_anomaly        → catch-all (analyst review)
+    """
     if sample["battery_voltage"] < 2.85:
-        return "battery_critical"
+        return "lock_battery_critical"
     if sample["signal_strength_dbm"] <= -95.0:
-        return "device_offline"
+        return "gateway_disconnect"
     if sample["lock_events_count"] >= 5:
-        return "unusual_access_pattern"
-    return "point_anomaly"
+        return "tenant_access_anomaly"
+    return "telemetry_anomaly"
 
 
 async def _persist(telemetry_row: Telemetry, anomalies: list[Anomaly]) -> None:
@@ -90,6 +95,22 @@ async def _persist(telemetry_row: Telemetry, anomalies: list[Anomaly]) -> None:
         for a in anomalies:
             session.add(a)
         await session.commit()
+
+
+def _identity_fields(sample: dict) -> dict:
+    """The placement metadata we copy from the inbound message into both
+    the Telemetry row and any flagged Anomaly row, so that the API can
+    filter / group by customer and facility without joins."""
+    return {
+        "device_id":     sample["device_id"],
+        "customer_id":   sample.get("customer_id"),
+        "customer_name": sample.get("customer_name"),
+        "site_id":       sample.get("site_id"),
+        "site_name":     sample.get("site_name"),
+        "gateway_id":    sample.get("gateway_id"),
+        "building":      sample.get("building"),
+        "unit_id":       sample.get("unit_id"),
+    }
 
 
 async def _process(
@@ -104,14 +125,11 @@ async def _process(
         return
 
     device_id: str = sample["device_id"]
-    site_id = sample.get("site_id")
-    site_name = sample.get("site_name")
     ts = datetime.fromisoformat(sample["timestamp"])
+    ident = _identity_fields(sample)
 
     telem = Telemetry(
-        device_id=device_id,
-        site_id=site_id,
-        site_name=site_name,
+        **ident,
         timestamp=ts,
         battery_voltage=sample["battery_voltage"],
         lock_events_count=sample["lock_events_count"],
@@ -126,9 +144,7 @@ async def _process(
         if is_anom:
             anomalies.append(
                 Anomaly(
-                    device_id=device_id,
-                    site_id=site_id,
-                    site_name=site_name,
+                    **ident,
                     timestamp=ts,
                     anomaly_type=_classify_point_anomaly(sample),
                     detected_by_model="isolation_forest",
@@ -147,11 +163,9 @@ async def _process(
             if is_anom:
                 anomalies.append(
                     Anomaly(
-                        device_id=device_id,
-                        site_id=site_id,
-                        site_name=site_name,
+                        **ident,
                         timestamp=ts,
-                        anomaly_type="sequence_anomaly",
+                        anomaly_type="behavioral_drift",
                         detected_by_model="lstm_autoencoder",
                         severity=_severity(err, lstm.threshold),
                         raw_payload=sample,

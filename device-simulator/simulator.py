@@ -1,4 +1,4 @@
-"""Realistic IoT smart-lock simulator → Kafka producer.
+"""Realistic Nokē Smart Entry simulator → Kafka producer.
 
 Per-tick generation is **not** independent samples — it carries state so that
 traces look like real telemetry rather than random pulses:
@@ -14,7 +14,15 @@ traces look like real telemetry rather than random pulses:
 
 Three anomaly patterns inject with probability ``ANOMALY_PROBABILITY``,
 and once started they persist for several ticks (battery cliffs and RSSI
-floors don't last one sample in real life).
+floors don't last one sample in real life). Type names use the Nokē
+operations playbook so they map directly to dispatch actions:
+
+    lock_battery_critical    → schedule a battery swap
+    gateway_disconnect       → escalate to network ops / carrier
+    tenant_access_anomaly    → review video, contact tenant, security
+
+A small HTTP control server runs on port 9100 so the API can pause/resume
+the firehose for demos without bouncing the container.
 """
 
 from __future__ import annotations
@@ -28,9 +36,10 @@ import random
 import signal
 from datetime import datetime, timezone
 
+from aiohttp import web
 from aiokafka import AIOKafkaProducer
 
-from device_profiles import DeviceProfile, generate_fleet
+from device_profiles import DeviceProfile, generate_units
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
@@ -38,6 +47,7 @@ TOPIC = os.environ.get("KAFKA_TOPIC", "device-telemetry")
 DEVICE_COUNT = int(os.environ.get("DEVICE_COUNT", "500"))
 INTERVAL_SEC = float(os.environ.get("EMIT_INTERVAL_SEC", "5"))
 ANOMALY_P = float(os.environ.get("ANOMALY_PROBABILITY", "0.02"))
+CONTROL_PORT = int(os.environ.get("CONTROL_PORT", "9100"))
 
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -45,16 +55,25 @@ logging.basicConfig(
 )
 log = logging.getLogger("simulator")
 
-ANOMALY_TYPES = ("battery_drop", "connectivity_flap", "access_spike")
+# Nokē-aligned anomaly labels — what a CSE actually dispatches against.
+ANOMALY_TYPES = (
+    "lock_battery_critical",
+    "gateway_disconnect",
+    "tenant_access_anomaly",
+)
+
+# Single global pause flag. When set, per-device tasks skip their emit step
+# but stay alive — so resuming is instant and per-device state is preserved.
+_paused = asyncio.Event()
 
 
 # ─── Diurnal helpers ────────────────────────────────────────────────────────
 
 def _diurnal_event_factor(hour: float) -> float:
-    """Smart-lock activity profile. Two Gaussian peaks (morning + evening)
+    """Self-storage access profile. Two Gaussian peaks (morning + evening)
     on a small overnight floor. Returns a multiplier in roughly [0.05, 1.05]."""
-    morning = math.exp(-((hour - 8.0) ** 2) / 4.0)   # commute / school run
-    evening = math.exp(-((hour - 18.0) ** 2) / 5.0)  # home from work
+    morning = math.exp(-((hour - 8.0) ** 2) / 4.0)   # before-work drop-by
+    evening = math.exp(-((hour - 18.0) ** 2) / 5.0)  # after-work drop-by
     return 0.05 + 0.95 * (morning + 0.85 * evening) / 1.85
 
 
@@ -116,30 +135,30 @@ def _maybe_inject_anomaly(
     if p.flap_streak_remaining > 0:
         p.flap_streak_remaining -= 1
         payload["signal_strength_dbm"] = round(rng.uniform(-100.0, -97.0), 2)
-        return "connectivity_flap"
+        return "gateway_disconnect"
     if p.spike_streak_remaining > 0:
         p.spike_streak_remaining -= 1
         payload["lock_events_count"] = max(
             payload["lock_events_count"], int(p.events_lambda_peak * 6) + 4
         )
-        return "access_spike"
+        return "tenant_access_anomaly"
     if p.battery_drop_remaining > 0:
         p.battery_drop_remaining -= 1
         payload["battery_voltage"] = round(
             max(p.battery_floor_v - 0.3, payload["battery_voltage"] - 0.5), 4
         )
-        return "battery_drop"
+        return "lock_battery_critical"
 
     if rng.random() >= ANOMALY_P:
         return None
 
     kind = rng.choice(ANOMALY_TYPES)
-    if kind == "battery_drop":
+    if kind == "lock_battery_critical":
         # Real cliffs persist — battery doesn't recover on its own.
         p.battery_drop_remaining = rng.randint(4, 10)
-    elif kind == "connectivity_flap":
+    elif kind == "gateway_disconnect":
         p.flap_streak_remaining = rng.randint(3, 7)
-    else:  # access_spike
+    else:  # tenant_access_anomaly
         p.spike_streak_remaining = rng.randint(2, 4)
     # Recurse once to apply the freshly-set streak this same tick.
     return _maybe_inject_anomaly(p, payload, rng)
@@ -153,10 +172,19 @@ async def _run_device(
     stop: asyncio.Event,
 ) -> None:
     rng = random.Random(hash(profile.device_id) & 0xFFFFFFFF)
-    # Stagger so the whole fleet doesn't burst on a single tick.
+    # Stagger so all units don't burst on a single tick.
     await asyncio.sleep(rng.uniform(0, INTERVAL_SEC))
 
     while not stop.is_set():
+        # Honor the global pause flag — sleep in 1s slices so resume is snappy
+        # without needing to wake every device task on the resume edge.
+        if _paused.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                pass
+            continue
+
         profile.age_seconds += INTERVAL_SEC
         now = datetime.now(timezone.utc)
         hour = now.hour + now.minute / 60.0
@@ -166,8 +194,13 @@ async def _run_device(
 
         msg = {
             "device_id": profile.device_id,
+            "customer_id": profile.customer_id,
+            "customer_name": profile.customer_name,
             "site_id": profile.site_id,
             "site_name": profile.site_name,
+            "gateway_id": profile.gateway_id,
+            "building": profile.building,
+            "unit_id": profile.unit_id,
             "timestamp": now.isoformat(),
             **payload,
         }
@@ -187,13 +220,46 @@ async def _run_device(
             pass
 
 
+# ─── Control HTTP server ────────────────────────────────────────────────────
+
+async def _start_control_server() -> web.AppRunner:
+    """Tiny aiohttp control plane on :CONTROL_PORT. Reachable only inside the
+    docker network (no host port published). The API service proxies to it."""
+
+    async def get_state(_req: web.Request) -> web.Response:
+        return web.json_response({"running": not _paused.is_set()})
+
+    async def post_pause(_req: web.Request) -> web.Response:
+        _paused.set()
+        log.info("simulation PAUSED via control")
+        return web.json_response({"running": False})
+
+    async def post_resume(_req: web.Request) -> web.Response:
+        _paused.clear()
+        log.info("simulation RESUMED via control")
+        return web.json_response({"running": True})
+
+    app = web.Application()
+    app.add_routes([
+        web.get("/state", get_state),
+        web.post("/pause", post_pause),
+        web.post("/resume", post_resume),
+    ])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", CONTROL_PORT)
+    await site.start()
+    log.info("control server listening on :%d", CONTROL_PORT)
+    return runner
+
+
 # ─── Entrypoint ─────────────────────────────────────────────────────────────
 
 async def main() -> None:
-    fleet = generate_fleet(DEVICE_COUNT)
+    units = generate_units(DEVICE_COUNT)
     log.info(
-        "starting %d devices, interval=%.1fs, anomaly_p=%.3f, topic=%s",
-        len(fleet), INTERVAL_SEC, ANOMALY_P, TOPIC,
+        "starting %d Nokē units, interval=%.1fs, anomaly_p=%.3f, topic=%s",
+        len(units), INTERVAL_SEC, ANOMALY_P, TOPIC,
     )
     producer = AIOKafkaProducer(
         bootstrap_servers=BOOTSTRAP,
@@ -202,6 +268,7 @@ async def main() -> None:
         max_batch_size=64 * 1024,
     )
     await producer.start()
+    control_runner = await _start_control_server()
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -209,9 +276,10 @@ async def main() -> None:
         loop.add_signal_handler(sig_, stop.set)
 
     try:
-        await asyncio.gather(*(_run_device(producer, d, stop) for d in fleet))
+        await asyncio.gather(*(_run_device(producer, d, stop) for d in units))
     finally:
         await producer.stop()
+        await control_runner.cleanup()
         log.info("simulator stopped")
 
 

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { FleetStats, SiteSummary } from "@/lib/types";
+import type { SiteSummary, UnitsStats } from "@/lib/types";
 
 export function useSites() {
   return useQuery<SiteSummary[]>({
@@ -10,10 +10,10 @@ export function useSites() {
   });
 }
 
-export function useFleetStats() {
-  return useQuery<FleetStats>({
+export function useUnitsStats() {
+  return useQuery<UnitsStats>({
     queryKey: ["stats"],
-    queryFn: api.fleetStats,
+    queryFn: api.unitsStats,
     refetchInterval: 5_000,
   });
 }

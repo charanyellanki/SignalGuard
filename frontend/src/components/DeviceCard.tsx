@@ -39,8 +39,15 @@ export function DeviceCard({ device, onClick }: Props) {
       onClick={onClick}
     >
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-mono">{device.device_id}</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <CardTitle className="truncate font-mono text-sm">{device.device_id}</CardTitle>
+            {device.unit_id ? (
+              <div className="text-[11px] text-muted-foreground">
+                unit <span className="font-mono text-foreground">{device.unit_id}</span>
+              </div>
+            ) : null}
+          </div>
           {offline ? (
             <Badge variant="destructive" className="gap-1">
               <WifiOff className="h-3 w-3" /> offline

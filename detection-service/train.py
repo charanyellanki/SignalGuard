@@ -22,7 +22,9 @@ from synthetic import generate_normal_traces
 
 # Bump this whenever the feature schema, generator, or hyperparameters change
 # so older saved models on the volume get replaced on next boot.
-MODEL_VERSION = 2
+# v3: retrained against the Nokē Smart Entry deployment (customer/site/unit
+#     hierarchy added; same 4 sensor features so model architecture unchanged).
+MODEL_VERSION = 3
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models/trained"))
 IFOREST_PATH = MODEL_DIR / "iforest.joblib"

@@ -32,8 +32,17 @@ class Telemetry(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(64), index=True)
+
+    # ── Placement ───────────────────────────────────────────────────────
+    customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    customer_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     site_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     site_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gateway_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    building: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    unit_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # ── Telemetry payload ───────────────────────────────────────────────
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     battery_voltage: Mapped[float] = mapped_column(Float)
     lock_events_count: Mapped[int] = mapped_column(Integer)
@@ -46,14 +55,31 @@ class Anomaly(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(64), index=True)
+
+    # ── Placement (denormalized for filter speed) ───────────────────────
+    customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    customer_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     site_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     site_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gateway_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    building: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    unit_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # ── Detection ───────────────────────────────────────────────────────
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     anomaly_type: Mapped[str] = mapped_column(String(64))
     detected_by_model: Mapped[str] = mapped_column(String(64))
     severity: Mapped[str] = mapped_column(String(16))
     raw_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── NOC workflow state ──────────────────────────────────────────────
+    # Lifecycle: open → acknowledged → dispatched → resolved
+    # (or open → snoozed → open ; or open → false_positive)
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    assignee: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    acted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    action_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

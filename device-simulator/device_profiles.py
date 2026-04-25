@@ -1,11 +1,12 @@
-"""Per-device baseline parameters + mutable per-device state.
+"""Per-Nokē-lock baseline parameters + mutable per-device state.
 
-Each virtual device has a stable personality (signal baseline, base event
-rate, temperature baseline) **and** mutable state that drives temporal
-realism (last RSSI for AR(1), last temp, last event count for burstiness).
+Each virtual Nokē Smart Entry lock has a stable personality (signal
+baseline, base event rate, temperature baseline) **and** mutable state
+that drives temporal realism (last RSSI for AR(1), last temp, last
+event count for burstiness).
 
-Devices share generation logic with ``detection-service/synthetic.py`` —
-keep them in sync if you change either.
+The locks share generation logic with ``detection-service/synthetic.py``
+— keep them in sync if you change either.
 """
 
 from __future__ import annotations
@@ -13,14 +14,21 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-from sites import Site, assign_devices_to_sites
+from sites import Site, assign_devices_to_sites, assign_unit
 
 
 @dataclass
 class DeviceProfile:
     device_id: str
+
+    # ── Identity / placement ─────────────────────────────────────────────
     site_id: str
     site_name: str
+    customer_id: str
+    customer_name: str
+    gateway_id: str
+    building: str
+    unit_id: str       # facility-scoped unit number, e.g. "B-204"
 
     # ── Battery ──────────────────────────────────────────────────────────
     # Linear drain from start → floor over the device's rated life.
@@ -30,7 +38,7 @@ class DeviceProfile:
 
     # ── Signal (RSSI) ────────────────────────────────────────────────────
     # AR(1) random walk: rssi_t = α * rssi_{t-1} + (1-α) * baseline + N(0, σ).
-    # High α → smooth drift, low α → noisy. Real Wi-Fi/LoRa traces are smooth.
+    # High α → smooth drift, low α → noisy. Real BLE/LTE-M traces are smooth.
     signal_baseline_dbm: float
     signal_jitter_dbm: float
     signal_ar_alpha: float
@@ -58,17 +66,23 @@ class DeviceProfile:
     battery_drop_remaining: int = 0
 
 
-def generate_fleet(count: int, seed: int = 42) -> list[DeviceProfile]:
+def generate_units(count: int, seed: int = 42) -> list[DeviceProfile]:
     rng = random.Random(seed)
     site_assignment: list[Site] = assign_devices_to_sites(count, seed=seed + 1)
-    fleet: list[DeviceProfile] = []
+    units: list[DeviceProfile] = []
     for i in range(count):
         site = site_assignment[i]
-        fleet.append(
+        building, unit_id = assign_unit(site, rng)
+        units.append(
             DeviceProfile(
-                device_id=f"lock-{i:04d}",
+                device_id=f"noke-{i:05d}",
                 site_id=site.site_id,
                 site_name=site.name,
+                customer_id=site.customer_id,
+                customer_name=site.customer_name,
+                gateway_id=site.gateway_id,
+                building=building,
+                unit_id=unit_id,
                 battery_start_v=rng.uniform(3.15, 3.30),
                 battery_floor_v=rng.uniform(2.60, 2.75),
                 battery_life_hours=rng.uniform(720, 1440),  # 30–60 days
@@ -82,4 +96,4 @@ def generate_fleet(count: int, seed: int = 42) -> list[DeviceProfile]:
                 temp_jitter_c=rng.uniform(0.15, 0.35),
             )
         )
-    return fleet
+    return units

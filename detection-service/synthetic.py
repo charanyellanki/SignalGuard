@@ -38,7 +38,7 @@ def generate_normal_traces(
     traces: list[np.ndarray] = []
 
     for _ in range(n_devices):
-        # Per-device baseline (same ranges as device_profiles.generate_fleet).
+        # Per-unit baseline (same ranges as device_profiles.generate_units).
         bat0 = rng.uniform(3.15, 3.30)
         bat_floor = rng.uniform(2.60, 2.75)
         life_h = rng.uniform(720, 1440)

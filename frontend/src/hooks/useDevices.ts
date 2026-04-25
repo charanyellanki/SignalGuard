@@ -2,10 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { DeviceDetail, DeviceSummary } from "@/lib/types";
 
-export function useDevices(siteId?: string) {
+export interface DeviceFilter {
+  customer_id?: string;
+  site_id?: string;
+}
+
+export function useDevices(filter: DeviceFilter = {}) {
   return useQuery<DeviceSummary[]>({
-    queryKey: ["devices", siteId ?? "all"],
-    queryFn: () => api.listDevices(siteId),
+    queryKey: ["devices", filter],
+    queryFn: () => api.listDevices(filter),
     refetchInterval: 5_000,
   });
 }

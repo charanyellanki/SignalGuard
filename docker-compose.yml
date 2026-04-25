@@ -94,6 +94,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
       DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      # Reaches the simulator's control plane over the docker network only —
+      # the port is intentionally not published to the host.
+      SIMULATOR_CONTROL_URL: http://device-simulator:9100
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       postgres:

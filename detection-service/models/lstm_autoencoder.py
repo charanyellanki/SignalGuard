@@ -83,7 +83,7 @@ class LSTMAutoencoderDetector:
         # Threshold = ``threshold_pct``-th percentile of per-window reconstruction MSE.
         # The default (99) keeps the per-sample false-positive rate ~1% and
         # combines with the consumer-side cooldown to stay well below the
-        # alert-fatigue line on a 500-device fleet.
+        # alert-fatigue line on a 500-unit deployment.
         model.eval()
         with torch.no_grad():
             recon = model(x)

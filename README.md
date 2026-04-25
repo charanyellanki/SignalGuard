@@ -1,6 +1,6 @@
-# SignalGuard — Real-time Anomaly Detection for IoT Device Fleets
+# SignalGuard — Real-time Anomaly Detection for Nokē Smart Entry Units
 
-Streaming anomaly detection for a simulated fleet of 500 smart-lock IoT devices. Telemetry flows through Kafka into an async detection service that runs **Isolation Forest** (sklearn) and an **LSTM autoencoder** (PyTorch) side-by-side; anomalies land in Postgres and fan out to a React operations dashboard over WebSockets.
+Streaming anomaly detection for a simulated deployment of 500 Nokē smart-lock units across 12 self-storage facilities. Telemetry flows through Kafka into an async detection service that runs **Isolation Forest** (sklearn) and an **LSTM autoencoder** (PyTorch) side-by-side; anomalies land in Postgres and fan out to a React operations dashboard over WebSockets.
 
 This is a portfolio project demonstrating end-to-end production ML engineering patterns — not a research result. Results from validating the approach against the public [SKAB](https://github.com/waico/SKAB) benchmark are reported below.
 
