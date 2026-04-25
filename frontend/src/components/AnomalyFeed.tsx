@@ -67,6 +67,11 @@ export function AnomalyFeed({ onStatusChange }: Props) {
                   <span className="font-mono text-foreground">{a.device_id}</span>
                   <Badge variant={severityVariant(a.severity)}>{a.severity}</Badge>
                 </div>
+                {a.site_name ? (
+                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                    {a.site_name}
+                  </div>
+                ) : null}
                 <div className="mt-1 flex items-center justify-between text-muted-foreground">
                   <span>{a.anomaly_type}</span>
                   <span className="font-mono">{a.detected_by_model}</span>

@@ -32,6 +32,8 @@ class Telemetry(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(64), index=True)
+    site_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    site_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     battery_voltage: Mapped[float] = mapped_column(Float)
     lock_events_count: Mapped[int] = mapped_column(Integer)
@@ -44,6 +46,8 @@ class Anomaly(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(64), index=True)
+    site_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    site_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     anomaly_type: Mapped[str] = mapped_column(String(64))
     detected_by_model: Mapped[str] = mapped_column(String(64))

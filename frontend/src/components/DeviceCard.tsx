@@ -1,4 +1,4 @@
-import { Battery, BatteryLow, Signal, SignalLow } from "lucide-react";
+import { Battery, BatteryLow, Signal, SignalLow, WifiOff } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { DeviceSummary } from "@/lib/types";
@@ -29,16 +29,23 @@ function signalIcon(dbm: number | undefined): JSX.Element {
 export function DeviceCard({ device, onClick }: Props) {
   const t = device.latest;
   const hasAnom = device.anomaly_count > 0;
+  const offline = !device.online;
 
   return (
     <Card
-      className="cursor-pointer transition-colors hover:border-primary/40"
+      className={`cursor-pointer transition-colors hover:border-primary/40 ${
+        offline ? "border-destructive/40" : ""
+      }`}
       onClick={onClick}
     >
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-mono">{device.device_id}</CardTitle>
-          {hasAnom ? (
+          {offline ? (
+            <Badge variant="destructive" className="gap-1">
+              <WifiOff className="h-3 w-3" /> offline
+            </Badge>
+          ) : hasAnom ? (
             <Badge variant="destructive">{device.anomaly_count}</Badge>
           ) : (
             <Badge variant="success">ok</Badge>

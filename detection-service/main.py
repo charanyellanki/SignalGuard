@@ -1,13 +1,13 @@
-"""Kafka consumer that runs two anomaly detectors per message and persists
-telemetry + anomalies to Postgres.
+"""Kafka consumer that runs IsolationForest + LSTM autoencoder per message
+and persists telemetry + anomalies to Postgres.
 
-Design notes:
-* Trains models on first boot if they are missing (MODEL_DIR volume empty).
-* Per-device rolling window kept in-memory for LSTM sequence scoring.
-* IForest runs on every sample (point detector). LSTM runs once a device has
-  ``WINDOW_SIZE`` samples buffered.
-* Either detector can be disabled via env (ENABLE_ISOLATION_FOREST,
-  ENABLE_LSTM_AUTOENCODER).
+False-positive controls:
+* IForest contamination is set in train.py (0.005) — point anomalies are rare.
+* LSTM threshold is the 99th percentile of training reconstruction error.
+* Per-(device, model) **cooldown** — once a device is flagged by a model,
+  further flags from the same model are suppressed for ``COOLDOWN_SEC``.
+  This prevents a device that is genuinely in trouble from spamming the
+  feed every 5s for the duration of an episode.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import logging
 import os
 import signal
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aiokafka import AIOKafkaConsumer
@@ -35,6 +35,7 @@ GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "detection-service")
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models/trained"))
 USE_IFOREST = os.environ.get("ENABLE_ISOLATION_FOREST", "true").lower() == "true"
 USE_LSTM = os.environ.get("ENABLE_LSTM_AUTOENCODER", "true").lower() == "true"
+COOLDOWN_SEC = int(os.environ.get("ANOMALY_COOLDOWN_SEC", "60"))
 
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -44,10 +45,20 @@ log = logging.getLogger("detector")
 
 # Per-device sliding windows for the LSTM autoencoder.
 _windows: dict[str, deque[dict]] = {}
+# Per-(device, model) cooldown. Suppress duplicate flags during the same episode.
+_cooldown_until: dict[tuple[str, str], datetime] = {}
+
+
+def _in_cooldown(device_id: str, model_name: str, now: datetime) -> bool:
+    until = _cooldown_until.get((device_id, model_name))
+    return until is not None and now < until
+
+
+def _set_cooldown(device_id: str, model_name: str, now: datetime) -> None:
+    _cooldown_until[(device_id, model_name)] = now + timedelta(seconds=COOLDOWN_SEC)
 
 
 def _severity(score: float, threshold: float) -> str:
-    """Bucket anomaly score into low / medium / high."""
     if threshold <= 0:
         return "medium"
     ratio = score / threshold
@@ -59,21 +70,22 @@ def _severity(score: float, threshold: float) -> str:
 
 
 def _classify_point_anomaly(sample: dict) -> str:
-    """Cheap heuristic label for IForest flags — the model itself is agnostic,
-    but the dashboard is more useful with a typed anomaly."""
-    if sample["battery_voltage"] < 2.8:
-        return "battery_drop"
-    if sample["signal_strength_dbm"] <= -95:
-        return "connectivity_flap"
+    """Cheap heuristic label for IForest flags, using Noke domain language.
+
+    The model is feature-agnostic; these labels just give the dashboard a
+    typed reason that maps to the operations playbook (battery dispatch,
+    gateway escalation, after-hours access review)."""
+    if sample["battery_voltage"] < 2.85:
+        return "battery_critical"
+    if sample["signal_strength_dbm"] <= -95.0:
+        return "device_offline"
     if sample["lock_events_count"] >= 5:
-        return "access_spike"
+        return "unusual_access_pattern"
     return "point_anomaly"
 
 
-async def _persist(
-    session_factory, telemetry_row: Telemetry, anomalies: list[Anomaly]
-) -> None:
-    async with session_factory() as session:
+async def _persist(telemetry_row: Telemetry, anomalies: list[Anomaly]) -> None:
+    async with SessionLocal() as session:
         session.add(telemetry_row)
         for a in anomalies:
             session.add(a)
@@ -92,10 +104,14 @@ async def _process(
         return
 
     device_id: str = sample["device_id"]
+    site_id = sample.get("site_id")
+    site_name = sample.get("site_name")
     ts = datetime.fromisoformat(sample["timestamp"])
 
     telem = Telemetry(
         device_id=device_id,
+        site_id=site_id,
+        site_name=site_name,
         timestamp=ts,
         battery_voltage=sample["battery_voltage"],
         lock_events_count=sample["lock_events_count"],
@@ -105,12 +121,14 @@ async def _process(
 
     anomalies: list[Anomaly] = []
 
-    if iforest is not None:
+    if iforest is not None and not _in_cooldown(device_id, "isolation_forest", ts):
         is_anom, score = iforest.predict(sample)
         if is_anom:
             anomalies.append(
                 Anomaly(
                     device_id=device_id,
+                    site_id=site_id,
+                    site_name=site_name,
                     timestamp=ts,
                     anomaly_type=_classify_point_anomaly(sample),
                     detected_by_model="isolation_forest",
@@ -119,16 +137,19 @@ async def _process(
                     reason=f"iforest score={score:.3f}",
                 )
             )
+            _set_cooldown(device_id, "isolation_forest", ts)
 
     if lstm is not None:
         buf = _windows.setdefault(device_id, deque(maxlen=WINDOW_SIZE))
         buf.append(sample)
-        if len(buf) == WINDOW_SIZE:
+        if len(buf) == WINDOW_SIZE and not _in_cooldown(device_id, "lstm_autoencoder", ts):
             is_anom, err = lstm.predict(list(buf))
             if is_anom:
                 anomalies.append(
                     Anomaly(
                         device_id=device_id,
+                        site_id=site_id,
+                        site_name=site_name,
                         timestamp=ts,
                         anomaly_type="sequence_anomaly",
                         detected_by_model="lstm_autoencoder",
@@ -137,8 +158,9 @@ async def _process(
                         reason=f"recon_err={err:.5f} (thr={lstm.threshold:.5f})",
                     )
                 )
+                _set_cooldown(device_id, "lstm_autoencoder", ts)
 
-    await _persist(SessionLocal, telem, anomalies)
+    await _persist(telem, anomalies)
     if anomalies:
         log.info(
             "device=%s flagged by=%s",
@@ -148,18 +170,30 @@ async def _process(
 
 
 def _ensure_models() -> tuple[IForestDetector | None, LSTMAutoencoderDetector | None]:
+    """Train on first boot OR if MODEL_VERSION has been bumped since last save."""
     iforest_path = MODEL_DIR / "iforest.joblib"
     lstm_pt = MODEL_DIR / "lstm_ae.pt"
-    if (USE_IFOREST and not iforest_path.exists()) or (USE_LSTM and not lstm_pt.exists()):
-        log.info("models missing — running first-boot training ...")
-        trainer.main(force=False)
+
+    needs_train = (USE_IFOREST and not iforest_path.exists()) or (
+        USE_LSTM and not lstm_pt.exists()
+    )
+    saved = trainer._saved_version()
+    if not needs_train and saved != trainer.MODEL_VERSION:
+        log.info("model version mismatch (saved=%s, expected=%d) — retraining",
+                 saved, trainer.MODEL_VERSION)
+        needs_train = True
+
+    if needs_train:
+        log.info("running training pass ...")
+        trainer.main(force=True)
 
     iforest = IForestDetector.load(iforest_path) if USE_IFOREST else None
     lstm = LSTMAutoencoderDetector.load(MODEL_DIR) if USE_LSTM else None
     log.info(
-        "loaded detectors: iforest=%s lstm=%s",
+        "loaded detectors: iforest=%s lstm=%s cooldown=%ds",
         "on" if iforest else "off",
         "on" if lstm else "off",
+        COOLDOWN_SEC,
     )
     return iforest, lstm
 
@@ -179,8 +213,8 @@ async def main() -> None:
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, stop.set)
+    for sig_ in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig_, stop.set)
 
     try:
         while not stop.is_set():
@@ -191,6 +225,9 @@ async def main() -> None:
         await consumer.stop()
         log.info("detector stopped")
 
+
+# Suppress unused-import warning — datetime.timezone needed for type clarity in Anomaly
+_ = timezone
 
 if __name__ == "__main__":
     asyncio.run(main())

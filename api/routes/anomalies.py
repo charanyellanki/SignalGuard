@@ -16,6 +16,7 @@ router = APIRouter(prefix="/anomalies", tags=["anomalies"])
 async def list_anomalies(
     session: AsyncSession = Depends(get_session),
     device_id: str | None = None,
+    site_id: str | None = None,
     anomaly_type: str | None = None,
     severity: Severity | None = None,
     detected_by_model: str | None = None,
@@ -27,6 +28,7 @@ async def list_anomalies(
 
     for col, value in (
         (Anomaly.device_id, device_id),
+        (Anomaly.site_id, site_id),
         (Anomaly.anomaly_type, anomaly_type),
         (Anomaly.severity, severity),
         (Anomaly.detected_by_model, detected_by_model),

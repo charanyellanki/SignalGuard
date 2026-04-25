@@ -64,6 +64,12 @@ export function DeviceDetail({ deviceId, open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle className="font-mono text-base">{deviceId ?? ""}</DialogTitle>
           <DialogDescription>
+            {data?.site_name ? (
+              <>
+                <span className="text-foreground">{data.site_name}</span>
+                <span className="mx-1.5">·</span>
+              </>
+            ) : null}
             Last 100 telemetry samples and recent anomalies.
           </DialogDescription>
         </DialogHeader>

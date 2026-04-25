@@ -1,17 +1,17 @@
 services:
   postgres:
     image: postgres:16
-    container_name: sentinel-postgres
+    container_name: signalguard-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
-      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+      POSTGRES_USER: ${POSTGRES_USER:-signalguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-signalguard}
+      POSTGRES_DB: ${POSTGRES_DB:-signalguard}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel} -d ${POSTGRES_DB:-sentinel}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-signalguard} -d ${POSTGRES_DB:-signalguard}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -20,7 +20,7 @@ services:
 
   kafka:
     image: confluentinc/cp-kafka:latest
-    container_name: sentinel-kafka
+    container_name: signalguard-kafka
     ports:
       - "${KAFKA_HOST_PORT:-29092}:29092"
     environment:
@@ -49,7 +49,7 @@ services:
 
   device-simulator:
     build: ./device-simulator
-    container_name: sentinel-simulator
+    container_name: signalguard-simulator
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC:-device-telemetry}
@@ -64,12 +64,12 @@ services:
 
   detection-service:
     build: ./detection-service
-    container_name: sentinel-detector
+    container_name: signalguard-detector
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC:-device-telemetry}
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-detection-service}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/${POSTGRES_DB:-sentinel}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
       ENABLE_ISOLATION_FOREST: ${ENABLE_ISOLATION_FOREST:-true}
       ENABLE_LSTM_AUTOENCODER: ${ENABLE_LSTM_AUTOENCODER:-true}
       MODEL_DIR: /app/models/trained
@@ -87,12 +87,12 @@ services:
 
   api:
     build: ./api
-    container_name: sentinel-api
+    container_name: signalguard-api
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/${POSTGRES_DB:-sentinel}
-      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/${POSTGRES_DB:-sentinel}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
@@ -108,7 +108,7 @@ services:
 
   frontend:
     build: ./frontend
-    container_name: sentinel-frontend
+    container_name: signalguard-frontend
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     environment:

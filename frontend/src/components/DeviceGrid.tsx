@@ -3,11 +3,12 @@ import { DeviceCard } from "./DeviceCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface Props {
+  siteId?: string;
   onSelect: (deviceId: string) => void;
 }
 
-export function DeviceGrid({ onSelect }: Props) {
-  const { data, isLoading, error } = useDevices();
+export function DeviceGrid({ siteId, onSelect }: Props) {
+  const { data, isLoading, error } = useDevices(siteId);
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading devices…</p>;
@@ -25,7 +26,9 @@ export function DeviceGrid({ onSelect }: Props) {
       <Alert>
         <AlertTitle>No telemetry yet</AlertTitle>
         <AlertDescription>
-          Waiting for the first messages to land — typically ~10s after boot.
+          {siteId
+            ? "No devices reporting from this site yet."
+            : "Waiting for the first messages to land — typically ~10s after boot."}
         </AlertDescription>
       </Alert>
     );

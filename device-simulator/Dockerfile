@@ -9,6 +9,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY device_profiles.py simulator.py ./
+COPY device_profiles.py simulator.py sites.py ./
 
 CMD ["python", "-u", "simulator.py"]

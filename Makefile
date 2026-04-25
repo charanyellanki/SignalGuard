@@ -59,7 +59,7 @@ shell-api: ## Open a shell in the api container
 
 .PHONY: shell-db
 shell-db: ## Open psql against the postgres container
-	$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-sentinel} -d $${POSTGRES_DB:-sentinel}
+	$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-signalguard} -d $${POSTGRES_DB:-signalguard}
 
 .PHONY: restart-%
 restart-%: ## Restart one service (e.g. make restart-detection-service)

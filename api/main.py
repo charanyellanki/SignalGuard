@@ -14,6 +14,7 @@ from sqlalchemy import text
 from db import SessionLocal
 from routes import anomalies as anomalies_routes
 from routes import devices as devices_routes
+from routes import sites as sites_routes
 from routes import websocket as ws_routes
 from schemas import HealthResponse
 
@@ -38,7 +39,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="Sentinel API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SignalGuard API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,6 +49,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(sites_routes.router)
 app.include_router(devices_routes.router)
 app.include_router(anomalies_routes.router)
 app.include_router(ws_routes.router)

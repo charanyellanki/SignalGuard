@@ -54,6 +54,7 @@ class LSTMAutoencoderDetector:
         epochs: int = 25,
         lr: float = 1e-3,
         batch_size: int = 128,
+        threshold_pct: float = 99.0,
     ) -> "LSTMAutoencoderDetector":
         assert windows.ndim == 3 and windows.shape[1:] == (WINDOW_SIZE, N_FEATURES)
 
@@ -79,12 +80,15 @@ class LSTMAutoencoderDetector:
                 loss.backward()
                 opt.step()
 
-        # Threshold = 95th percentile of per-window reconstruction MSE.
+        # Threshold = ``threshold_pct``-th percentile of per-window reconstruction MSE.
+        # The default (99) keeps the per-sample false-positive rate ~1% and
+        # combines with the consumer-side cooldown to stay well below the
+        # alert-fatigue line on a 500-device fleet.
         model.eval()
         with torch.no_grad():
             recon = model(x)
             errs = ((recon - x) ** 2).mean(dim=(1, 2)).cpu().numpy()
-        threshold = float(np.percentile(errs, 95))
+        threshold = float(np.percentile(errs, threshold_pct))
 
         return cls(model=model, mean=mean, std=std, threshold=threshold)
 

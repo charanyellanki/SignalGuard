@@ -1,4 +1,4 @@
-# Sentinel — Real-time Anomaly Detection for IoT Device Fleets
+# SignalGuard — Real-time Anomaly Detection for IoT Device Fleets
 
 Streaming anomaly detection for a simulated fleet of 500 smart-lock IoT devices. Telemetry flows through Kafka into an async detection service that runs **Isolation Forest** (sklearn) and an **LSTM autoencoder** (PyTorch) side-by-side; anomalies land in Postgres and fan out to a React operations dashboard over WebSockets.
 

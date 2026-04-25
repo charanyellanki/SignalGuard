@@ -2,8 +2,10 @@ import type {
   AnomalyPage,
   DeviceDetail,
   DeviceSummary,
+  FleetStats,
   HealthResponse,
   Severity,
+  SiteSummary,
 } from "./types";
 
 const API_BASE: string = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -20,13 +22,19 @@ async function getJSON<T>(path: string): Promise<T> {
 export const api = {
   health: (): Promise<HealthResponse> => getJSON("/health"),
 
-  listDevices: (): Promise<DeviceSummary[]> => getJSON("/devices"),
+  fleetStats: (): Promise<FleetStats> => getJSON("/stats"),
+
+  listSites: (): Promise<SiteSummary[]> => getJSON("/sites"),
+
+  listDevices: (siteId?: string): Promise<DeviceSummary[]> =>
+    getJSON(`/devices${siteId ? `?site_id=${encodeURIComponent(siteId)}` : ""}`),
 
   getDevice: (deviceId: string): Promise<DeviceDetail> =>
     getJSON(`/devices/${encodeURIComponent(deviceId)}`),
 
   listAnomalies: (params: {
     device_id?: string;
+    site_id?: string;
     anomaly_type?: string;
     severity?: Severity;
     detected_by_model?: string;
