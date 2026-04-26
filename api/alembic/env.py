@@ -16,10 +16,17 @@ if config.config_file_name:
     fileConfig(config.config_file_name)
 
 # DATABASE_URL_SYNC is a libpq URL with the psycopg2 driver. Fall back to the
-# async URL with the driver prefix rewritten.
-_sync_url = os.environ.get("DATABASE_URL_SYNC") or os.environ["DATABASE_URL"].replace(
-    "postgresql+asyncpg://", "postgresql+psycopg2://"
-)
+# async URL with the driver prefix rewritten. Handle all three common Supabase
+# URL shapes: postgresql+asyncpg://, postgresql+psycopg2://, postgresql://.
+def _to_sync_url(raw: str) -> str:
+    if raw.startswith("postgresql+asyncpg://"):
+        return raw.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+    if raw.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + raw[len("postgresql://"):]
+    return raw  # already has a sync driver prefix
+
+
+_sync_url = os.environ.get("DATABASE_URL_SYNC") or _to_sync_url(os.environ["DATABASE_URL"])
 config.set_main_option("sqlalchemy.url", _sync_url)
 
 target_metadata = Base.metadata
