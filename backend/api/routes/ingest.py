@@ -1,8 +1,7 @@
 """Telemetry ingest endpoint (Kafka replacement).
 
-The simulator POSTs raw telemetry samples here. We persist them to the
-`telemetry` table with `processed=false`. The detection service polls rows
-from Postgres, scores them, writes anomalies, and marks telemetry processed.
+The simulator (HTTP or in-process) POSTs here. Rows go to `telemetry` with
+`processed=false`. The API's detector task scores and marks them processed.
 """
 
 from __future__ import annotations
@@ -14,7 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import Telemetry, get_session
+from db import get_session
+from ingest_core import _insert_with_session
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
@@ -52,7 +52,8 @@ async def ingest_telemetry(
     session: AsyncSession = Depends(get_session),
 ) -> IngestResponse:
     try:
-        row = Telemetry(
+        await _insert_with_session(
+            session,
             device_id=payload.device_id,
             timestamp=payload.timestamp,
             battery_voltage=payload.battery_voltage,
@@ -66,10 +67,7 @@ async def ingest_telemetry(
             gateway_id=payload.gateway_id,
             building=payload.building,
             unit_id=payload.unit_id,
-            processed=False,
-            processed_at=None,
         )
-        session.add(row)
         await session.commit()
         return IngestResponse()
     except Exception as exc:

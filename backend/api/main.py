@@ -31,15 +31,21 @@ CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(","
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    pg_task = asyncio.create_task(ws_routes.listen_forever(), name="pg-listen")
-    det_task = asyncio.create_task(detector.poll_forever(), name="detector")
-    log.info("started background tasks: pg-listen, detector")
+    from simulation.worker import run_forever
+
+    tasks: list[asyncio.Task[None]] = [
+        asyncio.create_task(ws_routes.listen_forever(), name="pg-listen"),
+        asyncio.create_task(detector.poll_forever(), name="detector"),
+    ]
+    if os.environ.get("SIMULATOR_ENABLED", "true").lower() == "true":
+        tasks.append(asyncio.create_task(run_forever(), name="simulation"))
+    log.info("started background tasks: %s", [t.get_name() for t in tasks])
     try:
         yield
     finally:
-        pg_task.cancel()
-        det_task.cancel()
-        for t in (pg_task, det_task):
+        for t in tasks:
+            t.cancel()
+        for t in tasks:
             try:
                 await t
             except asyncio.CancelledError:

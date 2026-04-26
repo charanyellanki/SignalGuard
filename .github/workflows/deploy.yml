@@ -6,18 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       rebuild_all:
-        description: "Build/push all backend images and trigger Render deploy hooks (useful for testing)"
+        description: "Build/push API image and trigger Render deploy hook (useful for testing)"
         type: boolean
         default: false
       skip_render:
-        description: "Only build/push images to GHCR; do not call Render deploy hooks"
+        description: "Only build/push image to GHCR; do not call Render deploy hook"
         type: boolean
         default: false
 
 permissions:
   contents: read
   packages: write
-  # Used by buildx gha cache (type=gha)
   actions: write
 
 concurrency:
@@ -33,7 +32,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Helps path filters on push events (comparing to prior commit).
           fetch-depth: 0
 
       - name: Detect changed paths
@@ -44,9 +42,7 @@ jobs:
             workflows:
               - '.github/workflows/**'
             api:
-              - 'api/**'
-            simulator:
-              - 'device-simulator/**'
+              - 'backend/api/**'
 
       - name: Compute lowercase GHCR owner (Docker requires lowercase)
         id: meta
@@ -68,15 +64,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push api
+      # Single unified image: FastAPI + embedded detector + embedded simulator
+      - name: Build & push signalguard-api
         if: |
           (github.event_name == 'workflow_dispatch' && inputs.rebuild_all == 'true') ||
           steps.changes.outputs.api == 'true' ||
           steps.changes.outputs.workflows == 'true'
         uses: docker/build-push-action@v6
         with:
-          context: ./api
-          file: ./api/Dockerfile
+          context: ./backend/api
+          file: ./backend/api/Dockerfile
           push: true
           provenance: false
           cache-from: type=gha
@@ -84,25 +81,6 @@ jobs:
           tags: |
             ghcr.io/${{ steps.meta.outputs.ghcr_owner_lc }}/signalguard-api:${{ env.IMAGE_TAG }}
             ghcr.io/${{ steps.meta.outputs.ghcr_owner_lc }}/signalguard-api:latest
-
-      # detection-service is now merged into the API process (api/detector.py)
-
-      - name: Build & push device-simulator
-        if: |
-          (github.event_name == 'workflow_dispatch' && inputs.rebuild_all == 'true') ||
-          steps.changes.outputs.simulator == 'true' ||
-          steps.changes.outputs.workflows == 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: ./device-simulator
-          file: ./device-simulator/Dockerfile
-          push: true
-          provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: |
-            ghcr.io/${{ steps.meta.outputs.ghcr_owner_lc }}/signalguard-device-simulator:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ steps.meta.outputs.ghcr_owner_lc }}/signalguard-device-simulator:latest
 
       - name: Trigger Render deploy (api)
         if: |
@@ -117,25 +95,6 @@ jobs:
         run: |
           if [ -z "${RENDER_DEPLOY_HOOK}" ]; then
             echo "RENDER_DEPLOY_HOOK_API not set; skipping"
-            exit 0
-          fi
-          curl -fsSL -X POST "${RENDER_DEPLOY_HOOK}"
-
-      # Render deploy hook for detector removed — now co-located in the API
-
-      - name: Trigger Render deploy (simulator worker)
-        if: |
-          (github.event_name != 'workflow_dispatch' || inputs.skip_render != 'true') &&
-          (
-            (github.event_name == 'workflow_dispatch' && inputs.rebuild_all == 'true') ||
-            steps.changes.outputs.simulator == 'true' ||
-            steps.changes.outputs.workflows == 'true'
-          )
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_SIMULATOR }}
-        run: |
-          if [ -z "${RENDER_DEPLOY_HOOK}" ]; then
-            echo "RENDER_DEPLOY_HOOK_SIMULATOR not set; skipping"
             exit 0
           fi
           curl -fsSL -X POST "${RENDER_DEPLOY_HOOK}"

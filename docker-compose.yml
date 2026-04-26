@@ -18,51 +18,26 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  device-simulator:
-    build: ./device-simulator
-    container_name: signalguard-simulator
-    environment:
-      INGEST_URL: ${INGEST_URL:-http://api:8000/ingest/telemetry}
-      DEVICE_COUNT: ${DEVICE_COUNT:-500}
-      EMIT_INTERVAL_SEC: ${EMIT_INTERVAL_SEC:-5}
-      ANOMALY_PROBABILITY: ${ANOMALY_PROBABILITY:-0.02}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
-
-  detection-service:
-    build: ./detection-service
-    container_name: signalguard-detector
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
-      ENABLE_ISOLATION_FOREST: ${ENABLE_ISOLATION_FOREST:-true}
-      ENABLE_LSTM_AUTOENCODER: ${ENABLE_LSTM_AUTOENCODER:-true}
-      MODEL_DIR: /app/models/trained
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - detection_models:/app/models/trained
-    depends_on:
-      postgres:
-        condition: service_healthy
-      api:
-        condition: service_healthy
-    restart: unless-stopped
-
   api:
-    build: ./api
+    build: ./backend/api
     container_name: signalguard-api
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
-      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
-      # Reaches the simulator's control plane over the docker network only —
-      # the port is intentionally not published to the host.
-      SIMULATOR_CONTROL_URL: http://device-simulator:9100
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Embedded simulator (replaces the old device-simulator service)
+      SIMULATOR_ENABLED: "true"
+      DEVICE_COUNT: ${DEVICE_COUNT:-50}
+      EMIT_INTERVAL_SEC: ${EMIT_INTERVAL_SEC:-5}
+      ANOMALY_PROBABILITY: ${ANOMALY_PROBABILITY:-0.02}
+      # First boot: train small synthetic models on disk (no W&B required locally)
+      ALLOW_BOOTSTRAP_TRAIN: "true"
+      REQUIRE_WANDB_MODEL: "false"
+      MODEL_DIR: /app/models/trained
+    volumes:
+      - api_models:/app/models/trained
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,7 +46,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 90s
     restart: unless-stopped
 
   frontend:
@@ -99,4 +74,4 @@ services:
 
 volumes:
   postgres_data:
-  detection_models:
+  api_models:

@@ -1,7 +1,7 @@
 """Async SQLAlchemy engine + ORM models.
 
 These models are the source of truth for the schema — Alembic autogenerate
-reads them. The detection service mirrors this schema in its own ``db.py``.
+reads them. A legacy copy may exist under ``backend/archive/detection-service``.
 """
 
 from __future__ import annotations

@@ -18,7 +18,7 @@ depends_on = None
 
 def upgrade() -> None:
     # Nullable on add so existing rows survive the migration; new inserts
-    # are populated by the simulator + detection-service.
+    # are populated by the embedded simulator + API ingest.
     op.add_column("telemetry", sa.Column("site_id", sa.String(length=64), nullable=True))
     op.add_column("telemetry", sa.Column("site_name", sa.String(length=128), nullable=True))
     op.create_index("ix_telemetry_site_id", "telemetry", ["site_id"])

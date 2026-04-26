@@ -13,7 +13,7 @@ watch: ## Run stack with Compose Watch (live-sync frontend; run from repo root)
 up: ## Build and start the full stack
 	$(COMPOSE) up --build -d
 	@echo ""
-	@echo "Frontend:  http://localhost:${FRONTEND_PORT:-5173}  (nginx static build; host port maps to container :80)"
+	@echo "Frontend:  http://localhost:${FRONTEND_PORT:-5173}  (Vite dev server)"
 	@echo "API:       http://localhost:8000"
 	@echo "API docs:  http://localhost:8000/docs"
 	@echo ""
@@ -40,8 +40,8 @@ ps: ## Show service status
 	$(COMPOSE) ps
 
 .PHONY: train
-train: ## Force-retrain detection models (writes to detection_models volume)
-	$(COMPOSE) run --rm --no-deps detection-service python train.py --force
+train: ## Force-retrain models (writes to api_models volume; synthetic by default)
+	$(COMPOSE) run --rm --no-deps api python train.py --force --no-wandb
 
 .PHONY: migrate
 migrate: ## Apply latest Alembic migrations against running postgres
@@ -52,10 +52,9 @@ revision: ## Create a new Alembic revision (usage: make revision MSG="add foo")
 	$(COMPOSE) run --rm --no-deps api alembic revision --autogenerate -m "$(MSG)"
 
 .PHONY: validate-skab
-validate-skab: ## Run SKAB validation notebook headless
-	$(COMPOSE) run --rm --no-deps detection-service \
-		jupyter nbconvert --to notebook --execute /workspace/notebooks/skab-validation.ipynb \
-		--output skab-validation.out.ipynb
+validate-skab: ## Run SKAB validation notebook (installs jupyter in container; needs network)
+	$(COMPOSE) run --rm --no-deps -v "$$(pwd):/ws" -w /ws api \
+		bash -c "pip install -q jupyter nbconvert && jupyter nbconvert --to notebook --execute notebooks/skab-validation.ipynb"
 
 .PHONY: shell-api
 shell-api: ## Open a shell in the api container
