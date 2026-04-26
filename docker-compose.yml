@@ -24,6 +24,9 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
+      # Pin in-container listen port to match the right-hand side of `ports:` below.
+      # (On Render, the platform sets PORT; do not set this in the Render UI.)
+      PORT: "8000"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD:-signalguard}@postgres:5432/${POSTGRES_DB:-signalguard}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

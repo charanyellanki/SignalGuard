@@ -215,7 +215,9 @@ def _ensure_models() -> tuple[IForestDetector | None, LSTMAutoencoderDetector | 
 
 
 async def poll_forever() -> None:
-    iforest, lstm = _ensure_models()
+    # Bootstrap (sklearn/torch) is CPU-heavy and synchronous — run off the
+    # event loop so Uvicorn can answer /health and Render can bind PORT.
+    iforest, lstm = await asyncio.to_thread(_ensure_models)
     log.info("detector loop started, poll=%.1fs", POLL_INTERVAL_SEC)
     while True:
         try:
