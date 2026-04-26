@@ -13,5 +13,9 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 5173,
     strictPort: true,
+    // Reliable change detection when the app runs in Docker (Compose Watch)
+    watch: {
+      usePolling: true,
+    },
   },
 });

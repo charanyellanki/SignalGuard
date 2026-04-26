@@ -1,5 +1,5 @@
-"""Kafka consumer that runs IsolationForest + LSTM autoencoder per message
-and persists telemetry + anomalies to Postgres.
+"""Telemetry scorer that runs IsolationForest + LSTM autoencoder per sample
+and persists anomalies to Postgres.
 
 False-positive controls:
 * IForest contamination is set in train.py (0.005) — point anomalies are rare.
@@ -13,7 +13,6 @@ False-positive controls:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import signal
@@ -21,7 +20,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from aiokafka import AIOKafkaConsumer
+from sqlalchemy import select, update
 
 import train as trainer
 from db import Anomaly, SessionLocal, Telemetry
@@ -29,13 +28,12 @@ from models.isolation_forest import IForestDetector
 from models.lstm_autoencoder import LSTMAutoencoderDetector, WINDOW_SIZE
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-BOOTSTRAP = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
-TOPIC = os.environ.get("KAFKA_TOPIC", "device-telemetry")
-GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "detection-service")
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models/trained"))
 USE_IFOREST = os.environ.get("ENABLE_ISOLATION_FOREST", "true").lower() == "true"
 USE_LSTM = os.environ.get("ENABLE_LSTM_AUTOENCODER", "true").lower() == "true"
 COOLDOWN_SEC = int(os.environ.get("ANOMALY_COOLDOWN_SEC", "60"))
+POLL_INTERVAL_SEC = float(os.environ.get("POLL_INTERVAL_SEC", "0.5"))
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "200"))
 
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -114,28 +112,30 @@ def _identity_fields(sample: dict) -> dict:
 
 
 async def _process(
-    raw: bytes,
+    telemetry_row: Telemetry,
     iforest: IForestDetector | None,
     lstm: LSTMAutoencoderDetector | None,
 ) -> None:
-    try:
-        sample = json.loads(raw)
-    except json.JSONDecodeError:
-        log.warning("dropping malformed message")
-        return
+    # Convert the persisted row into the dict format the detectors expect.
+    sample = {
+        "device_id": telemetry_row.device_id,
+        "customer_id": telemetry_row.customer_id,
+        "customer_name": telemetry_row.customer_name,
+        "site_id": telemetry_row.site_id,
+        "site_name": telemetry_row.site_name,
+        "gateway_id": telemetry_row.gateway_id,
+        "building": telemetry_row.building,
+        "unit_id": telemetry_row.unit_id,
+        "timestamp": telemetry_row.timestamp.isoformat(),
+        "battery_voltage": telemetry_row.battery_voltage,
+        "lock_events_count": telemetry_row.lock_events_count,
+        "signal_strength_dbm": telemetry_row.signal_strength_dbm,
+        "temperature_c": telemetry_row.temperature_c,
+    }
 
-    device_id: str = sample["device_id"]
-    ts = datetime.fromisoformat(sample["timestamp"])
+    device_id: str = telemetry_row.device_id
+    ts = telemetry_row.timestamp
     ident = _identity_fields(sample)
-
-    telem = Telemetry(
-        **ident,
-        timestamp=ts,
-        battery_voltage=sample["battery_voltage"],
-        lock_events_count=sample["lock_events_count"],
-        signal_strength_dbm=sample["signal_strength_dbm"],
-        temperature_c=sample["temperature_c"],
-    )
 
     anomalies: list[Anomaly] = []
 
@@ -174,7 +174,12 @@ async def _process(
                 )
                 _set_cooldown(device_id, "lstm_autoencoder", ts)
 
-    await _persist(telem, anomalies)
+    # Persist anomalies (telemetry itself is already stored by the API).
+    if anomalies:
+        async with SessionLocal() as session:
+            for a in anomalies:
+                session.add(a)
+            await session.commit()
     if anomalies:
         log.info(
             "device=%s flagged by=%s",
@@ -215,16 +220,6 @@ def _ensure_models() -> tuple[IForestDetector | None, LSTMAutoencoderDetector | 
 async def main() -> None:
     iforest, lstm = _ensure_models()
 
-    consumer = AIOKafkaConsumer(
-        TOPIC,
-        bootstrap_servers=BOOTSTRAP,
-        group_id=GROUP_ID,
-        enable_auto_commit=True,
-        auto_offset_reset="latest",
-    )
-    await consumer.start()
-    log.info("subscribed topic=%s group=%s", TOPIC, GROUP_ID)
-
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig_ in (signal.SIGTERM, signal.SIGINT):
@@ -232,11 +227,36 @@ async def main() -> None:
 
     try:
         while not stop.is_set():
-            batch = await consumer.getmany(timeout_ms=1000, max_records=200)
-            for _tp, msgs in batch.items():
-                await asyncio.gather(*(_process(m.value, iforest, lstm) for m in msgs))
+            async with SessionLocal() as session:
+                # Claim a batch of unprocessed rows using SKIP LOCKED so multiple
+                # detector replicas can scale out safely.
+                stmt = (
+                    select(Telemetry)
+                    .where(Telemetry.processed.is_(False))
+                    .order_by(Telemetry.id)
+                    .limit(BATCH_SIZE)
+                    .with_for_update(skip_locked=True)
+                )
+                rows = (await session.execute(stmt)).scalars().all()
+
+                if not rows:
+                    await asyncio.sleep(POLL_INTERVAL_SEC)
+                    continue
+
+                # Mark claimed rows processed up-front to avoid duplicate work if we crash
+                # after releasing the row lock.
+                now = datetime.now(timezone.utc)
+                ids = [r.id for r in rows]
+                await session.execute(
+                    update(Telemetry)
+                    .where(Telemetry.id.in_(ids))
+                    .values(processed=True, processed_at=now)
+                )
+                await session.commit()
+
+            # Process outside the transaction to keep DB locks short.
+            await asyncio.gather(*(_process(r, iforest, lstm) for r in rows))
     finally:
-        await consumer.stop()
         log.info("detector stopped")
 
 

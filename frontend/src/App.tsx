@@ -33,16 +33,18 @@ export default function App(): JSX.Element {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground md:h-dvh md:max-h-dvh md:overflow-hidden">
       <Header wsConnected={wsConnected} />
 
-      <main className="container space-y-4 py-4">
-        <KpiStrip />
+      <main className="container flex min-h-0 flex-1 flex-col gap-4 py-4 md:overflow-hidden">
+        <div className="shrink-0">
+          <KpiStrip />
+        </div>
 
-        <div className="grid gap-4 md:grid-cols-[1fr_360px]">
-          <section className="min-w-0 space-y-3">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_360px] md:grid-rows-[minmax(0,1fr)] md:items-stretch md:h-full">
+          <section className="min-h-0 min-w-0 space-y-3 pr-0 md:overflow-y-auto md:pr-1 md:[scrollbar-gutter:stable]">
             <Tabs value={view} onValueChange={(v) => setView(v as View)}>
-              <div className="flex items-center justify-between">
+              <div className="sticky top-0 z-10 -mx-1 mb-0 flex items-center justify-between gap-2 border-b border-border/60 bg-background/95 px-1 py-2 backdrop-blur sm:-mx-0 sm:px-0">
                 <TabsList>
                   <TabsTrigger value="customers" className="gap-1.5">
                     <Users className="h-3.5 w-3.5" /> Customers
@@ -106,7 +108,7 @@ export default function App(): JSX.Element {
             </Tabs>
           </section>
 
-          <aside className="h-[calc(100vh-12rem)] md:sticky md:top-4">
+          <aside className="flex w-full min-w-0 min-h-0 flex-col max-md:max-h-[min(50vh,24rem)] md:h-full">
             <IncidentsQueue
               onStatusChange={setWsConnected}
               onSelectDevice={setSelectedDeviceId}

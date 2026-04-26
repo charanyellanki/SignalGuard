@@ -108,15 +108,27 @@ export function IncidentsQueue({ onStatusChange, onSelectDevice }: Props) {
   };
 
   return (
-    <Card className="flex h-full flex-col">
+    <Card className="flex h-full min-h-0 max-h-full flex-col">
       <CardHeader className="shrink-0 pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Active incidents</CardTitle>
-          <div className="flex items-center gap-1.5">
-            <Badge variant={status === "open" ? "success" : "warning"}>
-              {status === "open" ? "live" : status}
-            </Badge>
-          </div>
+          <span
+            role="status"
+            className={
+              status === "open"
+                ? "h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-card"
+                : status === "connecting"
+                  ? "h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-card"
+                  : "h-2.5 w-2.5 rounded-full bg-amber-600 ring-2 ring-card"
+            }
+            title={
+              status === "open"
+                ? "Live — connected to real-time stream"
+                : status === "connecting"
+                  ? "Connecting to real-time stream…"
+                  : "Real-time stream unavailable"
+            }
+          />
         </div>
         <div className="mt-2 flex items-center gap-1 text-[11px]">
           <button

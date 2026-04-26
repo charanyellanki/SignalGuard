@@ -16,6 +16,7 @@ from routes import admin as admin_routes
 from routes import anomalies as anomalies_routes
 from routes import customers as customers_routes
 from routes import devices as devices_routes
+from routes import ingest as ingest_routes
 from routes import sites as sites_routes
 from routes import websocket as ws_routes
 from schemas import HealthResponse
@@ -59,6 +60,7 @@ app.include_router(customers_routes.router)
 app.include_router(sites_routes.router)
 app.include_router(devices_routes.router)
 app.include_router(anomalies_routes.router)
+app.include_router(ingest_routes.router)
 app.include_router(admin_routes.router)
 app.include_router(ws_routes.router)
 

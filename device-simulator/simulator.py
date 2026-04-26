@@ -37,13 +37,12 @@ import signal
 from datetime import datetime, timezone
 
 from aiohttp import web
-from aiokafka import AIOKafkaProducer
+import aiohttp
 
 from device_profiles import DeviceProfile, generate_units
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-TOPIC = os.environ.get("KAFKA_TOPIC", "device-telemetry")
+INGEST_URL = os.environ.get("INGEST_URL", "http://api:8000/ingest/telemetry").rstrip("/")
 DEVICE_COUNT = int(os.environ.get("DEVICE_COUNT", "500"))
 INTERVAL_SEC = float(os.environ.get("EMIT_INTERVAL_SEC", "5"))
 ANOMALY_P = float(os.environ.get("ANOMALY_PROBABILITY", "0.02"))
@@ -167,7 +166,7 @@ def _maybe_inject_anomaly(
 # ─── Per-device task ────────────────────────────────────────────────────────
 
 async def _run_device(
-    producer: AIOKafkaProducer,
+    session: aiohttp.ClientSession,
     profile: DeviceProfile,
     stop: asyncio.Event,
 ) -> None:
@@ -208,11 +207,12 @@ async def _run_device(
             msg["_injected_anomaly"] = label  # ground-truth hint; ignored by detector
 
         try:
-            await producer.send_and_wait(
-                TOPIC, json.dumps(msg).encode(), key=profile.device_id.encode()
-            )
+            async with session.post(INGEST_URL, json=msg, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    log.warning("ingest failed status=%s device=%s body=%s", resp.status, profile.device_id, body[:2000])
         except Exception as exc:  # pragma: no cover — broker hiccup
-            log.warning("send failed for %s: %s", profile.device_id, exc)
+            log.warning("ingest failed for %s: %s", profile.device_id, exc)
 
         try:
             await asyncio.wait_for(stop.wait(), timeout=INTERVAL_SEC)
@@ -258,16 +258,10 @@ async def _start_control_server() -> web.AppRunner:
 async def main() -> None:
     units = generate_units(DEVICE_COUNT)
     log.info(
-        "starting %d Nokē units, interval=%.1fs, anomaly_p=%.3f, topic=%s",
-        len(units), INTERVAL_SEC, ANOMALY_P, TOPIC,
+        "starting %d Nokē units, interval=%.1fs, anomaly_p=%.3f, ingest=%s",
+        len(units), INTERVAL_SEC, ANOMALY_P, INGEST_URL,
     )
-    producer = AIOKafkaProducer(
-        bootstrap_servers=BOOTSTRAP,
-        acks="all",
-        linger_ms=50,
-        max_batch_size=64 * 1024,
-    )
-    await producer.start()
+    session = aiohttp.ClientSession()
     control_runner = await _start_control_server()
 
     stop = asyncio.Event()
@@ -276,9 +270,9 @@ async def main() -> None:
         loop.add_signal_handler(sig_, stop.set)
 
     try:
-        await asyncio.gather(*(_run_device(producer, d, stop) for d in units))
+        await asyncio.gather(*(_run_device(session, d, stop) for d in units))
     finally:
-        await producer.stop()
+        await session.close()
         await control_runner.cleanup()
         log.info("simulator stopped")
 

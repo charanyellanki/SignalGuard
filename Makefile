@@ -5,11 +5,15 @@ COMPOSE := docker compose
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
+.PHONY: watch
+watch: ## Run stack with Compose Watch (live-sync frontend; run from repo root)
+	$(COMPOSE) watch
+
 .PHONY: up
 up: ## Build and start the full stack
 	$(COMPOSE) up --build -d
 	@echo ""
-	@echo "Frontend:  http://localhost:5173"
+	@echo "Frontend:  http://localhost:${FRONTEND_PORT:-5173}  (nginx static build; host port maps to container :80)"
 	@echo "API:       http://localhost:8000"
 	@echo "API docs:  http://localhost:8000/docs"
 	@echo ""

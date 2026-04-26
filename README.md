@@ -1,6 +1,6 @@
 # SignalGuard — Real-time Anomaly Detection for Nokē Smart Entry Units
 
-Streaming anomaly detection for a simulated deployment of 500 Nokē smart-lock units across 12 self-storage facilities. Telemetry flows through Kafka into an async detection service that runs **Isolation Forest** (sklearn) and an **LSTM autoencoder** (PyTorch) side-by-side; anomalies land in Postgres and fan out to a React operations dashboard over WebSockets.
+Streaming anomaly detection for a simulated deployment of 500 Nokē smart-lock units across 12 self-storage facilities. Telemetry is ingested by the API into Postgres and processed by an async detection service that runs **Isolation Forest** (sklearn) and an **LSTM autoencoder** (PyTorch) side-by-side; anomalies land in Postgres and fan out to a React operations dashboard over WebSockets.
 
 This is a portfolio project demonstrating end-to-end production ML engineering patterns — not a research result. Results from validating the approach against the public [SKAB](https://github.com/waico/SKAB) benchmark are reported below.
 
@@ -11,10 +11,10 @@ This is a portfolio project demonstrating end-to-end production ML engineering p
 ![architecture](docs/architecture.png)
 
 ```
-┌──────────────────┐    ┌─────────┐    ┌────────────────────┐    ┌──────────┐
-│ device-simulator │───▶│  Kafka  │───▶│ detection-service  │───▶│ Postgres │
-│   (500 devices)  │    │ (KRaft) │    │  IForest + LSTM-AE │    │          │
-└──────────────────┘    └─────────┘    └────────────────────┘    └────┬─────┘
+┌──────────────────┐    ┌────────────────┐    ┌────────────────────┐    ┌──────────┐
+│ device-simulator │───▶│    FastAPI     │───▶│ detection-service  │───▶│ Postgres │
+│   (500 devices)  │    │  (REST ingest) │    │  IForest + LSTM-AE │    │          │
+└──────────────────┘    └────────────────┘    └────────────────────┘    └────┬─────┘
                                                                       │
                                                          LISTEN/NOTIFY│
                                                                       ▼
@@ -28,7 +28,7 @@ This is a portfolio project demonstrating end-to-end production ML engineering p
 
 | Layer        | Choice                                                              |
 |--------------|---------------------------------------------------------------------|
-| Streaming    | Kafka (KRaft mode, single broker) + `aiokafka`                      |
+| Streaming    | Postgres-backed ingest queue (no Kafka)                                   |
 | ML           | scikit-learn 1.5 (IsolationForest) + PyTorch 2.x (LSTM autoencoder) |
 | Storage      | PostgreSQL 16, SQLAlchemy 2.x async, asyncpg, Alembic migrations    |
 | API          | FastAPI + Pydantic v2 + uvicorn, WebSocket via Postgres LISTEN/NOTIFY |
@@ -54,7 +54,7 @@ See `make help` for the full command list.
 
 ## Key design decisions
 
-**Why Kafka.** At 500 devices × 1 msg/5s ≈ 100 msg/s, Kafka is overkill *for throughput alone* — a socket would handle it. It's here because the project is a demo of streaming patterns the detection service can exploit: consumer-group scale-out, replay from offsets when a model is retrained, and durable decoupling so a detector crash doesn't drop telemetry. All three properties are awkward to retrofit; cheap to get from Kafka on day one.
+**Why no Kafka.** For a deployable demo, removing Kafka makes the stack much easier to host on free/low-cost platforms. The API persists telemetry to Postgres with a `processed` flag; the detector claims unprocessed rows (using `SELECT ... FOR UPDATE SKIP LOCKED`), scores them, writes anomalies, and marks telemetry processed. This keeps the system decoupled and horizontally scalable without running a broker.
 
 **Why Isolation Forest *and* an LSTM autoencoder.** IForest is fast, interpretable, and catches point anomalies per-sample (sudden battery cliff, RSSI floor). It has no memory of the sequence. An LSTM autoencoder catches patterns IForest structurally cannot — a device whose readings are individually fine but whose *sequence* is off (access pattern drift, slow signal degradation). Running both in parallel lets the dashboard show which model flagged what, which is the interesting ML-engineering story for the portfolio.
 
@@ -73,8 +73,8 @@ iot-anomaly-detection/
 ├── docker-compose.yml          # single-command orchestration
 ├── Makefile                    # make up | down | logs | train | clean
 ├── .env.example
-├── device-simulator/           # Kafka producer, 500 virtual devices
-├── detection-service/          # aiokafka consumer, IForest + LSTM-AE
+├── device-simulator/           # HTTP producer, 500 virtual devices
+├── detection-service/          # Postgres queue consumer, IForest + LSTM-AE
 │   ├── models/                 # model implementations
 │   ├── models/trained/         # serialized models (volume-mounted)
 │   └── train.py                # synthetic-data training entrypoint

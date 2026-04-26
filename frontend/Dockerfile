@@ -7,7 +7,7 @@ RUN npm install
 
 COPY . .
 
+# Default remains dev-server. Vercel deploys via `npm run build` directly.
 EXPOSE 5173
 
-# Dev server — hot reload while iterating on the dashboard.
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

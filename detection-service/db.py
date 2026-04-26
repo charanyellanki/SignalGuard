@@ -11,12 +11,20 @@ import os
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Float, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-DATABASE_URL = os.environ["DATABASE_URL"]
+def _normalize_async_database_url(raw: str) -> str:
+    if raw.startswith("postgresql+asyncpg://"):
+        return raw
+    if raw.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + raw.removeprefix("postgresql://")
+    return raw
+
+
+DATABASE_URL = _normalize_async_database_url(os.environ["DATABASE_URL"])
 
 engine = create_async_engine(DATABASE_URL, pool_size=5, max_overflow=10, future=True)
 SessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
@@ -45,6 +53,8 @@ class Telemetry(Base):
     lock_events_count: Mapped[int] = mapped_column(Integer)
     signal_strength_dbm: Mapped[float] = mapped_column(Float)
     temperature_c: Mapped[float] = mapped_column(Float)
+    processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Anomaly(Base):

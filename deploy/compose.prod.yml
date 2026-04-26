@@ -1,0 +1,97 @@
+# Production-ish compose for a single VM.
+#
+# Images are expected to be pre-built and pushed to GHCR by CI.
+# Required env vars (examples):
+#   export IMAGE_TAG="$(git rev-parse HEAD)"
+#   export GHCR_OWNER="yourgithubuser"   # lowercase
+#   export POSTGRES_PASSWORD="..."     # strong secret
+#   export CORS_ORIGINS="https://your-frontend-domain"
+#
+# Frontend is served as static files (nginx) on :80.
+# API is served on :8000.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: signalguard-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-signalguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-signalguard}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-signalguard} -d ${POSTGRES_DB:-signalguard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/${GHCR_OWNER}/signalguard-api:${IMAGE_TAG}
+    container_name: signalguard-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-signalguard}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-signalguard}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SIMULATOR_CONTROL_URL: http://device-simulator:9100
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  detection-service:
+    image: ghcr.io/${GHCR_OWNER}/signalguard-detection-service:${IMAGE_TAG}
+    container_name: signalguard-detector
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-signalguard}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-signalguard}
+      ENABLE_ISOLATION_FOREST: ${ENABLE_ISOLATION_FOREST:-true}
+      ENABLE_LSTM_AUTOENCODER: ${ENABLE_LSTM_AUTOENCODER:-true}
+      MODEL_DIR: /app/models/trained
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - detection_models:/app/models/trained
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  device-simulator:
+    image: ghcr.io/${GHCR_OWNER}/signalguard-device-simulator:${IMAGE_TAG}
+    container_name: signalguard-simulator
+    environment:
+      INGEST_URL: http://api:8000/ingest/telemetry
+      DEVICE_COUNT: ${DEVICE_COUNT:-500}
+      EMIT_INTERVAL_SEC: ${EMIT_INTERVAL_SEC:-5}
+      ANOMALY_PROBABILITY: ${ANOMALY_PROBABILITY:-0.02}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/signalguard-frontend:${IMAGE_TAG}
+    container_name: signalguard-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  detection_models:

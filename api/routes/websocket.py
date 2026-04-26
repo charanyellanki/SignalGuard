@@ -28,9 +28,14 @@ from schemas import AnomalyRecord
 log = logging.getLogger("ws")
 router = APIRouter()
 
-# asyncpg needs a libpq-style DSN. Strip the SQLAlchemy driver prefix.
-_RAW_URL = os.environ["DATABASE_URL"]
-ASYNCPG_DSN = _RAW_URL.replace("postgresql+asyncpg://", "postgresql://")
+def _asyncpg_dsn_from_env(raw: str) -> str:
+    # asyncpg wants a libpq-style DSN (postgresql://...).
+    if raw.startswith("postgresql+asyncpg://"):
+        return raw.replace("postgresql+asyncpg://", "postgresql://", 1)
+    return raw
+
+
+ASYNCPG_DSN = _asyncpg_dsn_from_env(os.environ["DATABASE_URL"])
 
 
 class _Hub:
