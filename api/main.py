@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from db import SessionLocal
+import detector
 from routes import admin as admin_routes
 from routes import anomalies as anomalies_routes
 from routes import customers as customers_routes
@@ -30,16 +31,19 @@ CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(","
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(ws_routes.listen_forever(), name="pg-listen")
-    log.info("started pg-listen background task")
+    pg_task = asyncio.create_task(ws_routes.listen_forever(), name="pg-listen")
+    det_task = asyncio.create_task(detector.poll_forever(), name="detector")
+    log.info("started background tasks: pg-listen, detector")
     try:
         yield
     finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        pg_task.cancel()
+        det_task.cancel()
+        for t in (pg_task, det_task):
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(

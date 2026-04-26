@@ -45,8 +45,6 @@ jobs:
               - '.github/workflows/**'
             api:
               - 'api/**'
-            detection:
-              - 'detection-service/**'
             simulator:
               - 'device-simulator/**'
 
@@ -87,22 +85,7 @@ jobs:
             ghcr.io/${{ steps.meta.outputs.ghcr_owner_lc }}/signalguard-api:${{ env.IMAGE_TAG }}
             ghcr.io/${{ steps.meta.outputs.ghcr_owner_lc }}/signalguard-api:latest
 
-      - name: Build & push detection-service
-        if: |
-          (github.event_name == 'workflow_dispatch' && inputs.rebuild_all == 'true') ||
-          steps.changes.outputs.detection == 'true' ||
-          steps.changes.outputs.workflows == 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: ./detection-service
-          file: ./detection-service/Dockerfile
-          push: true
-          provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: |
-            ghcr.io/${{ steps.meta.outputs.ghcr_owner_lc }}/signalguard-detection-service:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ steps.meta.outputs.ghcr_owner_lc }}/signalguard-detection-service:latest
+      # detection-service is now merged into the API process (api/detector.py)
 
       - name: Build & push device-simulator
         if: |
@@ -138,22 +121,7 @@ jobs:
           fi
           curl -fsSL -X POST "${RENDER_DEPLOY_HOOK}"
 
-      - name: Trigger Render deploy (detector worker)
-        if: |
-          (github.event_name != 'workflow_dispatch' || inputs.skip_render != 'true') &&
-          (
-            (github.event_name == 'workflow_dispatch' && inputs.rebuild_all == 'true') ||
-            steps.changes.outputs.detection == 'true' ||
-            steps.changes.outputs.workflows == 'true'
-          )
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DETECTOR }}
-        run: |
-          if [ -z "${RENDER_DEPLOY_HOOK}" ]; then
-            echo "RENDER_DEPLOY_HOOK_DETECTOR not set; skipping"
-            exit 0
-          fi
-          curl -fsSL -X POST "${RENDER_DEPLOY_HOOK}"
+      # Render deploy hook for detector removed — now co-located in the API
 
       - name: Trigger Render deploy (simulator worker)
         if: |
